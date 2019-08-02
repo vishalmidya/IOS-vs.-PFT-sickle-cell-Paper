@@ -1,0 +1,1224 @@
+---
+title: "SCD Paper"
+author: "Vishal Midya"
+date: "`r Sys.Date()`"
+header-includes:
+   - \usepackage{multirow}
+output: 
+  html_document: 
+    theme: readable
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    fig_height: 5
+    number_sections: yes
+    toc: yes
+    toc_float: 
+      collapsed: false
+      smooth_scroll: true
+    self_contained: true
+    code_folding: hide
+    toc_depth: 6
+---
+
+Folder: `r getwd()`
+
+  <script language="javascript"> 
+    function toggle(num) {
+      var ele = document.getElementById("toggleText" + num);
+      var text = document.getElementById("displayText" + num);
+      if(ele.style.display == "block") {
+        ele.style.display = "none";
+        text.innerHTML = "show";
+      }
+      else {
+        ele.style.display = "block";
+        text.innerHTML = "hide";
+      }
+   } 
+  </script>
+
+<style>
+pre {
+  white-space: pre !important;
+  overflow-x: scroll !important;  
+  overflow-y: scroll !important;
+  height: auto !important;
+  max-height: 80vh !important;
+}
+</style>
+
+
+```{r setup, include=FALSE}
+options(digits = 4)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,cache=T,warning = FALSE)
+options(qwraps2_markup = "markdown")
+options(knitr.table.format = "latex") 
+```
+
+
+```{r, include=FALSE}
+
+library(car)
+library(readr)
+library(lattice)
+library(nlme)
+library(ggplot2)
+library(GGally)
+library(nnet)
+library(foreign)
+library(biotools)
+library(glmmML)
+library(MASS)
+library(lme4)
+library(multcomp)
+library(dplyr)
+library(qwraps2)
+library(knitr)
+library(xtable)
+library(kableExtra)
+library(DT)
+library(glmnet)
+library(corrplot)
+library(epiR)
+library(pROC)
+library(caret)
+library(xgboost)
+
+setwd("C:/Users/acer/Desktop/PennState Project/Pediatrics/Sickle Cell")
+
+```
+
+
+```{r,include=F,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+scd <- as.data.frame(read_csv("SCD_IOS_1_29_19_new.csv"))
+scd$Asthma <- factor(scd$Asthma, levels = c("Yes","No"))
+scd$FEV1_Signif_change <- scd$`FEV1_Significant_Change(12%)`
+
+for(i in 1:length(scd$FEV1_Signif_change)){
+  if(is.na(scd$FEV1_Signif_change[i])==F & scd$FEV1_Signif_change[i] == 2){
+    scd$FEV1_Signif_change[i] <- "significant"
+  }
+  else if(is.na(scd$FEV1_Signif_change[i])==F & scd$FEV1_Signif_change[i] == 1){
+    scd$FEV1_Signif_change[i] <- "Not_significant"
+  }
+}
+
+scd$FEV1_Signif_change <- factor(scd$FEV1_Signif_change, levels = c("significant","Not_significant"))
+
+
+scd$R5_Signif_change <- scd$`R5_significant_change_20%Code`
+
+for(i in 1:length(scd$R5_Signif_change)){
+  if(is.na(scd$R5_Signif_change[i])==F & scd$R5_Signif_change[i] == 2){
+    scd$R5_Signif_change[i] <- "Not_significant"
+  }
+  else if(is.na(scd$R5_Signif_change[i])==F & scd$R5_Signif_change[i] == 1){
+    scd$R5_Signif_change[i] <- "significant"
+  }
+}
+
+scd$R5_Signif_change <- factor(scd$R5_Signif_change, levels = c("significant","Not_significant"))
+
+
+
+scd$AX_Signif_change <- scd$`AX_significant_change_40%`
+
+for(i in 1:length(scd$AX_Signif_change)){
+  if(is.na(scd$AX_Signif_change[i])==F & scd$AX_Signif_change[i] == 2){
+    scd$AX_Signif_change[i] <- "Not_significant"
+  }
+  else if(is.na(scd$AX_Signif_change[i])==F & scd$AX_Signif_change[i] == 1){
+    scd$AX_Signif_change[i] <- "significant"
+  }
+}
+
+scd$AX_Signif_change <- factor(scd$AX_Signif_change, levels = c("significant","Not_significant"))
+
+
+scd$AX_new  <- rep(NA_real_,length(scd$AX))
+
+for(i in 1:length(scd$AX_new)){
+  if((scd$Gender[i] == "Male" | scd$Gender[i] == "male") & is.na(scd$AX[i])==F){
+    scd$AX_new[i] = exp(-0.034 * scd$Height_cm[i] + 4.524)
+  }
+  else if(scd$Gender[i] == "Female" & is.na(scd$AX[i])==F){
+    scd$AX_new[i] = exp(-0.033* scd$Height_cm[i] + 4.508)
+  }
+}
+
+scd$AX_ratio <- (scd$AX/scd$AX_new)*100
+scd$AX_AUC <- ((scd$Frespred * scd$X5Hzpred)/2)/100
+
+scd$DLCO_ADJUSTED_Hb_pp <- rep(NA_real_,dim(scd)[1])
+
+for(i in 1:dim(scd)[1]){
+  if(is.na(scd$DLCO_ADJUSTED_Hb_New[i]) == F){
+    scd$DLCO_ADJUSTED_Hb_pp[i] <- as.numeric(strsplit(scd$DLCO_ADJUSTED_Hb_New[i],"%")[[1]][1])
+  }
+}
+
+
+```
+
+
+# Table 4 Results
+
+## Diagnostic Values
+
+### FEV1
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+epi.tests(table(scd$FEV1_Signif_change,scd$Asthma))
+
+```
+
+
+### AX
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+epi.tests(table(scd$AX_Signif_change,scd$Asthma))
+
+```
+
+
+### R5
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+epi.tests(table(scd$R5_Signif_change,scd$Asthma))
+
+```
+
+
+## Test of Proportions for Table 4
+
+### Table 4
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+table4 <- data.frame(N = c(37,37,35), Positive_response_bronchodilator = c(20,22,7),
+                     percent = c(round((20/37)*100,1),round((22/37)*100,1),
+                     round((7/35)*100,1)))
+
+rownames(table4) <- c("R5HZ","AX","FEV1")
+
+qable(table4)
+
+```
+
+### FEV1 vs. R5HZ
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+prop.test(c(20,54.1),c(100,100),alternative = c("less"))
+
+```
+
+
+### FEV1 vs. AX
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+prop.test(c(20,59.5),c(100,100),alternative = c("less"))
+
+```
+
+
+# Table 1 Results
+
+## FEV1 (%)
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$FEV1pred[scd$Asthma=="Yes"],scd$FEV1pred[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$FEV1pred[scd$Asthma=="Yes"],scd$FEV1pred[scd$Asthma=="No"],paired=F)
+
+```
+
+
+## FEV1/FVC
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$FEV1FVC[scd$Asthma=="Yes"],scd$FEV1FVC[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$FEV1FVC[scd$Asthma=="Yes"],scd$FEV1FVC[scd$Asthma=="No"],paired=F)
+
+```
+
+
+## FEF25-75(%)
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$FEF2575pred[scd$Asthma=="Yes"],scd$FEF2575pred[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$FEF2575pred[scd$Asthma=="Yes"],scd$FEF2575pred[scd$Asthma=="No"],paired=F)
+
+```
+
+
+
+## R5Hz (%)
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$R5Hzpred[scd$Asthma=="Yes"],scd$R5Hzpred[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$R5Hzpred[scd$Asthma=="Yes"],scd$R5Hzpred[scd$Asthma=="No"],paired=F)
+
+```
+
+
+
+## X5Hz (%)
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$X5Hzpred[scd$Asthma=="Yes"],scd$X5Hzpred[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$X5Hzpred[scd$Asthma=="Yes"],scd$X5Hzpred[scd$Asthma=="No"],paired=F)
+
+```
+
+
+## AX
+
+### Mann-Whitney Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+wilcox.test(scd$AX[scd$Asthma=="Yes"],scd$AX[scd$Asthma=="No"],paired=F)
+
+```
+
+### Welch Two sample t Test
+
+```{r,include=T,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+t.test(scd$AX[scd$Asthma=="Yes"],scd$AX[scd$Asthma=="No"],paired=F)
+
+```
+
+
+# ROC Curves
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+scd$AXchangeInverse <- -1* scd$AXchange
+wpred <- scd[,(colnames(scd) %in% c("MRN","FEV1pred","FEV1FVC","FEF2575pred","R5Hzpred",
+                                    "AX","FEV1change","FEV1FVCchange","FEF2575change",
+                                    "R5changeInverse","AXchangeInverse","Asthma"))]
+
+wpred$Asthma <- as.character(wpred$Asthma)
+
+for(i in 1:length(wpred$Asthma)){
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="Yes"){
+    wpred$Asthma[i] = 1
+  }
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="No"){
+    wpred$Asthma[i] = 0
+  }
+}
+
+wpred$Asthma <- as.numeric(wpred$Asthma)
+
+```
+
+
+## AXchangeInverse
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_AX_chnage <- roc(wpred$Asthma,wpred$AXchangeInverse,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEV1change
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEV1_change <- roc(wpred$Asthma,wpred$FEV1change,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## R5changeInverse
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_R5_change <- roc(wpred$Asthma,wpred$R5changeInverse,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEF2575change
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEF2575_change <- roc(wpred$Asthma,wpred$FEF2575change,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEV1FVCchange
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEV1FVC_change <- roc(wpred$Asthma,wpred$FEV1FVCchange,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEV1pred
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEV1_pred <- roc(wpred$Asthma,wpred$FEV1pred,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEV1FVC
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEV1FVC <- roc(wpred$Asthma,wpred$FEV1FVC,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## FEF2575pred
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_FEF2575pred <- roc(wpred$Asthma,wpred$FEF2575pred,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## R5Hzpred
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_R5Hzpred <- roc(wpred$Asthma,wpred$R5Hzpred,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+## AX
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+(roc_AX <- roc(wpred$Asthma,wpred$AX,plot = T,ci =T,percent= F,grid =T))
+
+```
+
+
+### Ranking Based on Youden Statistic
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+roc_table <- data.frame(Names = c("AXchangeInverse","FEV1change","R5changeInverse","FEF2575change","FEV1FVCchange","FEV1pred","FEV1FVC","FEF2575pred","R5Hzpred","AX"),
+                        AUC = c(as.numeric(roc_AX_chnage$auc),as.numeric(roc_FEV1_change$auc),as.numeric(roc_R5_change$auc), as.numeric(roc_FEF2575_change$auc),as.numeric(roc_FEV1FVC_change$auc),as.numeric(roc_FEV1_pred$auc),as.numeric(roc_FEV1FVC$auc),as.numeric(roc_FEF2575pred$auc),as.numeric(roc_R5Hzpred$auc),as.numeric(roc_AX$auc)),
+                        AUC_CI =
+                          c(paste0(round(as.numeric(roc_AX_chnage$ci)[1],2),"-",round(as.numeric(roc_AX_chnage$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEV1_change$ci)[1],2),"-",round(as.numeric(roc_FEV1_change$ci)[2],2)),paste0(round(as.numeric(roc_R5_change$ci)[1],2),"-",round(as.numeric(roc_R5_change$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEF2575_change$ci)[1],2),"-",round(as.numeric(roc_FEF2575_change$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEV1FVC_change$ci)[1],2),"-",round(as.numeric(roc_FEV1FVC_change$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEV1_pred$ci)[1],2),"-",round(as.numeric(roc_FEV1_pred$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEV1FVC$ci)[1],2),"-",round(as.numeric(roc_FEV1FVC$ci)[2],2)),
+                            paste0(round(as.numeric(roc_FEF2575pred$ci)[1],2),"-",round(as.numeric(roc_FEF2575pred$ci)[2],2)),
+                            paste0(round(as.numeric(roc_R5Hzpred$ci)[1],2),"-",round(as.numeric(roc_R5Hzpred$ci)[2],2)),
+                            paste0(round(as.numeric(roc_AX$ci)[1],2),"-",round(as.numeric(roc_AX$ci)[2],2))))
+
+
+roc_table$Optimal_specificity = c(as.numeric(coords(roc_AX_chnage,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEV1_change,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_R5_change ,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEF2575_change,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEV1FVC_change,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEV1_pred,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEV1FVC,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_FEF2575pred ,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_R5Hzpred ,x="best",as.list=F, best.method=c("youden"))[2]),as.numeric(coords(roc_AX  ,x="best",as.list=F, best.method=c("youden"))[2]))
+
+roc_table$Optimal_sensitivity = c(as.numeric(coords(roc_AX_chnage,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEV1_change,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_R5_change ,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEF2575_change,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEV1FVC_change,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEV1_pred,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEV1FVC,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_FEF2575pred ,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_R5Hzpred ,x="best",as.list=F, best.method=c("youden"))[3]),as.numeric(coords(roc_AX  ,x="best",as.list=F, best.method=c("youden"))[3]))
+
+roc_table$Youden_statistic <- (roc_table$Optimal_specificity + roc_table$Optimal_sensitivity - 1)
+
+qable(roc_table[order(roc_table$Youden_statistic,decreasing = T),])
+
+```
+
+
+# XGBoost
+
+```{r,include=F,tidy=TRUE,echo=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+scd$AXchangeInverse <- -1* scd$AXchange
+wpred <- scd[,(colnames(scd) %in% c("MRN","FEV1pred","FEV1FVC","FEF2575pred","R5Hzpred",
+                                    "AX","FEV1change","FEV1FVCchange","FEF2575change",                            "R5changeInverse","AXchangeInverse","Asthma"))]
+
+wpred$Asthma <- as.character(wpred$Asthma)
+
+for(i in 1:length(wpred$Asthma)){
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="Yes"){
+    wpred$Asthma[i] = 1
+  }
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="No"){
+    wpred$Asthma[i] = 0
+  }
+}
+
+wpred$Asthma <- as.numeric(wpred$Asthma)
+
+train = sample(wpred$MRN,ceiling((dim(wpred)[1])*100/100))
+
+test = wpred$MRN[!(wpred$MRN %in% train)]
+
+x_train= data.matrix(wpred[wpred$MRN %in% train,!(colnames(wpred) %in% 
+                                                    c("MRN","Asthma"))])
+
+y_train = data.matrix(wpred[wpred$MRN %in% train,c("Asthma")])
+
+x_test = data.matrix(wpred[(wpred$MRN %in% test),!(colnames(wpred) %in% 
+                                                     c("MRN","Asthma"))])
+
+y_test = data.matrix(wpred[wpred$MRN %in% test,c("Asthma")])
+
+```
+
+## Model
+
+
+```{r,include=T,tidy=TRUE,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+set.seed(9294)
+xgb <-xgboost(data = x_train, label = y_train, 
+              nrounds = 50, prediction = T,
+              nfold = 3,verbose = T,maximize=FALSE,
+              objective = "reg:logistic",eval_metric = "error", booster = "gbtree",
+              max_depth = 8, eta = 0.06564606, gamma = 0.144125, subsample = 0.7176255,
+              colsample_bytree = 0.7405726, min_child_weight = 3,
+              max_delta_step = 5, nthread=6)
+
+imp <- xgb.importance(model = xgb)
+imp <- as.data.frame(imp)
+
+```
+
+## Variable Importance
+
+### Gain
+
+```{r,include=T,tidy=TRUE,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+qable(imp[order(imp$Gain, decreasing = T),c("Feature","Gain")])
+
+```
+
+### Frequency
+
+```{r,include=T,tidy=TRUE,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+qable(imp[order(imp$Frequency, decreasing = T),c("Feature","Frequency")])
+
+```
+
+
+### Cover
+
+```{r,include=T,tidy=TRUE,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+qable(imp[order(imp$Cover, decreasing = T),c("Feature","Cover")])
+
+```
+
+
+# ANN
+
+```{r,include=T,tidy=TRUE,echo=T,eval=F,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+scd$AXchangeInverse <- -1* scd$AXchange
+wpred <- scd[,(colnames(scd) %in% c("MRN","FEV1pred","FEV1FVC","FEF2575pred","R5Hzpred",
+                                    "AX","FEV1change","FEV1FVCchange","FEF2575change",                            "R5changeInverse","AXchangeInverse","Asthma"))]
+
+wpred$Asthma <- as.character(wpred$Asthma)
+
+for(i in 1:length(wpred$Asthma)){
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="Yes"){
+    wpred$Asthma[i] = 1
+  }
+  if(is.na(wpred$Asthma[i])==F & wpred$Asthma[i]=="No"){
+    wpred$Asthma[i] = 0
+  }
+}
+
+wpred$Asthma <- as.numeric(wpred$Asthma)
+wpred$Asthma <- factor(wpred$Asthma)
+
+train = sample(wpred$MRN,ceiling((dim(wpred)[1])*100/100))
+
+test = wpred$MRN[!(wpred$MRN %in% train)]
+
+x_train= data.matrix(wpred[wpred$MRN %in% train,!(colnames(wpred) %in% 
+                                                    c("MRN","Asthma"))])
+
+y_train = data.matrix(wpred[wpred$MRN %in% train,c("Asthma")])
+
+x_test = data.matrix(wpred[(wpred$MRN %in% test),!(colnames(wpred) %in% 
+                                                     c("MRN","Asthma"))])
+
+y_test = data.matrix(wpred[wpred$MRN %in% test,c("Asthma")])
+
+library(h2o)
+
+h2o.init(nthreads=-1, max_mem_size="20G")
+
+x_train_deep = as.data.frame(data.matrix(wpred[wpred$MRN %in% train,!(colnames(wpred) %in% 
+                                                                        c("MRN","Asthma"))]))
+x_train_deep$y <- wpred$Asthma
+x_train.hex <- as.h2o(x_train_deep)
+
+
+
+best_seednumber = 1234
+best_test_error_mean = 2
+best_test_error_std = NA_real_
+best_param = list()
+
+for (iter in 1:100) {
+  
+  seed.number = sample.int(10000, 1)[[1]]
+  set.seed(seed.number)
+  
+  hyper_params <- list(
+    activation=sample(c("Tanh","TanhWithDropout"),1),
+    input_dropout_ratio=runif(1,0,0.05),
+    l1=sample(seq(0,1e-4,1e-6),1),
+    l2=sample(seq(0,1e-4,1e-6),1))
+  
+  h2o.dl.3 <- h2o.deeplearning(x=1:dim(x_train.hex)[2]-1, y= dim(x_train.hex)[2], 
+                               training_frame = x_train.hex, nfolds = 3,
+                                ignore_const_cols =F, seed =  seed.number, reproducible = T,
+                                keep_cross_validation_predictions =T,loss = "Automatic",
+                                hidden = c(200,200), fold_assignment = "Modulo",
+                               stopping_metric = "misclassification", 
+                               activation = hyper_params$activation,
+                               input_dropout_ratio = hyper_params$input_dropout_ratio,
+                                l1=hyper_params$l1, l2=hyper_params$l2, 
+                                missing_values_handling = "MeanImputation")
+  
+  min_test_error_mean = as.numeric(h2o.dl.3@model$ cross_validation_metrics_summary["err","mean"])
+  min_test_error_std = as.numeric(h2o.dl.3@model$ cross_validation_metrics_summary["err","sd"])
+  
+  if (min_test_error_mean < best_test_error_mean) {
+    
+    best_test_error_mean = min_test_error_mean
+    best_test_error_std = min_test_error_std
+    best_seednumber = seed.number
+    
+    best_param =  hyper_params
+  }
+}
+
+best_test_error_mean    
+best_test_error_std     
+best_seednumber 
+best_param
+
+seed.number = 1375
+h2o.dl.3 <- h2o.deeplearning(x=1:dim(x_train.hex)[2]-1, y= dim(x_train.hex)[2],
+                              training_frame = x_train.hex,nfolds = 3,
+                             ignore_const_cols =F, seed =  seed.number, reproducible = T,
+                             keep_cross_validation_predictions =T,loss = "Automatic",
+                             hidden = c(200,200), fold_assignment = "Modulo",
+                             stopping_metric = "misclassification", 
+                             activation = "Tanh",
+                             input_dropout_ratio = 0.001742793 ,
+                             l1= 7.8e-05, l2 = 4.5e-05 , 
+                             missing_values_handling = "MeanImputation")
+
+(as.data.frame(h2o.varimp(h2o.dl.3)))
+
+
+```
+
+
+## Variable Importance
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+ANN <- data.frame(variable = c("R5Hzpred","FEV1FVCchange","FEV1FVC","AXchangeInverse",
+                               "AX","R5changeInverse","FEF2575pred","FEF2575change",
+                               "FEV1pred","FEV1change"),
+                  relative_importance = c(1,0.9215299,0.9174837,0.8997086,
+                                          0.8970649,0.8946820,0.8766919,
+                                          0.8759320,0.8593777,0.8480096),
+                  percentage = c(0.11122876,0.10250063,0.10205058,
+                                 0.10007348,0.09977941,0.09951437,
+                                 0.09751335,0.09742883,0.09558752,0.09432306))
+qable(ANN)
+
+
+```
+
+
+# Robust Linear Regressions: Between Height and PFT vs. Height and IOS measures
+
+## IOS Measures
+
+### Frespred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+library(robust)
+
+w_Frespred <- lmRob((Frespred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_Frespred)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.Frespred.rlm <- rlm((Frespred) ~ Height_cm ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.Frespred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting_IOS
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.Frespred.rlm <- rlm((Frespred) ~ Ageattesting_IOS ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.Frespred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+### X5Hzpred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_X5Hzpred <- lmRob((X5Hzpred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_X5Hzpred)
+
+```
+
+
+#### Height_cm
+
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.X5Hzpred.rlm <- rlm((X5Hzpred) ~ Height_cm + BT_2years +hospitalization ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.X5Hzpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting_IOS
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.X5Hzpred.rlm <- rlm((X5Hzpred) ~ Ageattesting_IOS + BT_2years +hospitalization  ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.X5Hzpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+### R5Hzpred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_R5Hzpred <- lmRob((R5Hzpred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_R5Hzpred)
+
+```
+
+#### Height_cm
+                      
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.R5Hzpred.rlm <- rlm((R5Hzpred) ~ Height_cm   ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.R5Hzpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting_IOS
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.R5Hzpred.rlm <- rlm((R5Hzpred) ~ Ageattesting_IOS  ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.R5Hzpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+## PFT Measures
+
+### FEV1pred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_FEV1pred <- lmRob((FEV1pred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_FEV1pred)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEV1pred.rlm <- rlm((FEV1pred) ~ Height_cm + Years_hydroxyurea,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEV1pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEV1pred.rlm <- rlm((FEV1pred) ~ Ageattesting + Years_hydroxyurea ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEV1pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+### FEV1FVC
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_FEV1FVC <- lmRob((FEV1FVC) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_FEV1FVC)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEV1FVC.rlm <- rlm((FEV1FVC) ~ Height_cm ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEV1FVC.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEV1FVC.rlm <- rlm((FEV1FVC) ~ Ageattesting ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEV1FVC.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+### FEF2575pred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_FEF2575pred <- lmRob((FEF2575pred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_FEF2575pred)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEF2575pred.rlm <- rlm((FEF2575pred) ~ Height_cm ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEF2575pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.FEF2575pred.rlm <- rlm((FEF2575pred) ~ Ageattesting ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.FEF2575pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+## TLCpred
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_TLCpred <- lmRob((TLCpred) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_TLCpred)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.TLCpred.rlm <- rlm((TLCpred) ~ Height_cm + LDH + Years_hydroxyurea + BT_2years 
+                      +hospitalization+  Reticulocyte_Count +SpO2
+                     ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.TLCpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.TLCpred.rlm <- rlm((TLCpred) ~ Ageattesting +  LDH + Years_hydroxyurea + BT_2years 
+                      +hospitalization+  Reticulocyte_Count +SpO2 ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.TLCpred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+## DLCO_Hb_VA_corrected
+
+### Plot for DLCO_Hb_VA_corrected vs. Height
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+plot(scd$Height_cm,scd$DLCO_Hb_VA_corrected, xlab= "Height", ylab = "DLCO_Hb_VA_corrected")
+
+```
+
+### Plot for DLCO_Hb_VA_corrected vs. Age
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+plot(scd$Ageattesting,scd$DLCO_Hb_VA_corrected, xlab= "Age", ylab = "DLCO_Hb_VA_corrected")
+
+```
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_DLCO_Hb_VA_corrected <- lmRob((DLCO_Hb_VA_corrected) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_DLCO_Hb_VA_corrected)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.DLCO_Hb_VA_corrected.rlm <- rlm((DLCO_Hb_VA_corrected) ~ Height_cm + Years_hydroxyurea +
+                                    hospitalization+ Reticulocyte_Count + SpO2,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.DLCO_Hb_VA_corrected.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting_IOS
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.DLCO_Hb_VA_corrected.rlm <- rlm((DLCO_Hb_VA_corrected) ~ Ageattesting_IOS + Years_hydroxyurea  +hospitalization+ Reticulocyte_Count + SpO2,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.DLCO_Hb_VA_corrected.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+
+## DLCO_ADJUSTED_Hb_pp
+
+### Plot for DLCO_ADJUSTED_Hb_pp vs. Height
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+plot(scd$Height_cm,scd$DLCO_ADJUSTED_Hb_pp, xlab= "Height", ylab = "DLCO_ADJUSTED_Hb_pp")
+
+```
+
+### Plot for DLCO_ADJUSTED_Hb_pp vs. Age
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+plot(scd$Ageattesting,scd$DLCO_ADJUSTED_Hb_pp, xlab= "Age", ylab = "DLCO_ADJUSTED_Hb_pp")
+
+```
+
+#### Other Predictor
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+w_DLCO_ADJUSTED_Hb_pp <- lmRob((DLCO_ADJUSTED_Hb_pp) ~ LDH + Years_hydroxyurea + BT_2years+ ACS_2years
+                      +hospitalization+ HbF + Reticulocyte_Count +SpO2,data=scd)
+
+summary(w_DLCO_ADJUSTED_Hb_pp)
+
+```
+
+
+#### Height_cm
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.DLCO_ADJUSTED_Hb_pp.rlm <- rlm((DLCO_ADJUSTED_Hb_pp) ~ Height_cm ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.DLCO_ADJUSTED_Hb_pp.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+#### Ageattesting_IOS
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.DLCO_ADJUSTED_Hb_pp.rlm <- rlm((DLCO_ADJUSTED_Hb_pp) ~ Ageattesting_IOS ,data=scd,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.DLCO_ADJUSTED_Hb_pp.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+# Robust Regression for Controls
+
+## R5Hz_pred
+
+### Height
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+control <- as.data.frame(read_csv("SCD_IOS_Control_12_8_18_Alison.csv"))
+
+f.R5Hz_pred.rlm <- rlm(R5Hz_pred ~ Height ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.R5Hz_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+### Age
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.R5Hz_pred.rlm <- rlm(R5Hz_pred ~ Age ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.R5Hz_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+## X5Hz_pred
+
+### Height
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.X5Hz_pred.rlm <- rlm(X5Hz_pred ~ Height ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.X5Hz_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+### Age
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.X5Hz_pred.rlm <- rlm(X5Hz_pred ~ Age ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.X5Hz_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+
+## Fres_pred
+
+### Height
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.Fres_pred.rlm <- rlm(Fres_pred ~ Height ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.Fres_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
+### Age
+
+```{r,include=T,tidy=T,eval=T,echo=T,strip.white=TRUE,highlight=TRUE,fig.align='center',dpi=200}
+
+f.Fres_pred.rlm <- rlm(Fres_pred ~ Age ,data=control,
+               maxit=1e3,psi=psi.hampel, method = "M", scale.est="proposal 2")
+
+surmod=summary(f.Fres_pred.rlm)
+dd=data.frame(surmod$coefficients)
+dd$p.value=2*pt(abs(dd$t.value), surmod$df[2], lower.tail=FALSE) 
+qable(round(dd,5))
+
+```
+
